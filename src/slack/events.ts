@@ -185,12 +185,16 @@ async function startTaskFromMessage(
       cleanedText,
     );
   } catch (err) {
-    logger.error("Failed to start task", { error: (err as Error).message });
+    const errMsg = (err as Error).message;
+    logger.error("Failed to start task", { error: errMsg });
+    const isMaxSessions = errMsg.toLowerCase().includes("max sessions");
     await client.chat
       .postMessage({
         channel: channelId,
         thread_ts: messageTs,
-        text: `Failed to start task: ${(err as Error).message}`,
+        text: isMaxSessions
+          ? `${errMsg}\nUse \`/sessions\` to see active sessions or \`/abort\` to end one.`
+          : `Failed to start task: ${errMsg}`,
       })
       .catch(() => {});
     await client.reactions

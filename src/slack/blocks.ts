@@ -90,7 +90,7 @@ export function buildTaskResult(
 }
 
 /**
- * Build session list display.
+ * Build session list display with per-session Abort buttons.
  */
 export function buildSessionList(sessions: SessionInfo[]): KnownBlock[] {
   if (sessions.length === 0) {
@@ -102,17 +102,18 @@ export function buildSessionList(sessions: SessionInfo[]): KnownBlock[] {
     ];
   }
 
-  const lines = sessions.map(
-    (s) => `\`${s.id}\` — ${s.task || "unnamed"} _(${s.state})_`,
-  );
-
-  return [
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*Sessions:*\n${lines.join("\n")}`,
-      },
+  return sessions.map((s): KnownBlock => ({
+    type: "section",
+    text: {
+      type: "mrkdwn",
+      text: `\`${s.id}\` — ${s.task || "unnamed"} _(${s.state})_`,
     },
-  ];
+    accessory: {
+      type: "button",
+      text: { type: "plain_text", text: "Abort" },
+      style: "danger",
+      action_id: "session_abort",
+      value: s.id,
+    },
+  }));
 }

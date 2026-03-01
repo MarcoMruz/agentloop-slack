@@ -79,4 +79,25 @@ export function registerActions(
       logger.error("Failed to abort task", { error: (err as Error).message });
     }
   });
+
+  app.action("session_abort", async ({ body, ack, client }) => {
+    await ack();
+    if (!isAllowed(body.user.id)) return;
+
+    const sessionId = (body as any).actions?.[0]?.value || "";
+
+    try {
+      await agentloop.abortTask(sessionId);
+      if ("message" in body && "channel" in body) {
+        await client.chat.update({
+          channel: (body as any).channel.id,
+          ts: (body as any).message.ts,
+          text: `Session \`${sessionId}\` aborted by <@${body.user.id}>`,
+          blocks: [],
+        });
+      }
+    } catch (err) {
+      logger.error("Failed to abort session", { error: (err as Error).message });
+    }
+  });
 }

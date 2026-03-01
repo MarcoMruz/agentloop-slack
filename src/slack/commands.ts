@@ -93,11 +93,24 @@ export function registerCommands(
     }
   });
 
-  // /abort — abort running session
+  // /abort [sessionId] — abort a running session
   app.command("/abort", async ({ command, ack, respond }) => {
     await ack();
     if (!isAllowed(command.user_id)) {
       await respond("Unauthorized");
+      return;
+    }
+
+    const sessionId = command.text.trim();
+
+    // Direct abort by ID
+    if (sessionId) {
+      try {
+        await agentloop.abortTask(sessionId);
+        await respond(`Session \`${sessionId}\` aborted.`);
+      } catch (err) {
+        await respond(`Error: ${(err as Error).message}`);
+      }
       return;
     }
 
@@ -107,8 +120,18 @@ export function registerCommands(
         await respond("No active session to abort.");
         return;
       }
-      await agentloop.abortTask(sessions[0].id);
-      await respond("Session aborted.");
+      if (sessions.length === 1) {
+        await agentloop.abortTask(sessions[0].id);
+        await respond("Session aborted.");
+        return;
+      }
+      // Multiple sessions — let user pick
+      const blocks = buildSessionList(sessions);
+      await respond({
+        response_type: "ephemeral",
+        text: "Multiple sessions running. Choose one to abort:",
+        blocks,
+      });
     } catch (err) {
       await respond(`Error: ${(err as Error).message}`);
     }
