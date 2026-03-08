@@ -16,13 +16,31 @@ export function buildHITLPrompt(
   requestId: string,
   toolName: string,
   details: string,
+  command?: string,
+  workDir?: string,
+  rule?: string,
 ): KnownBlock[] {
+  // Build enhanced display with command and rule
+  let displayText = `*Security Approval Required*`;
+  
+  if (rule) {
+    displayText += `\n🛡️ *Rule:* ${rule}`;
+  }
+  
+  if (command) {
+    displayText += `\n⚡ *Command:* \`\`\`${truncate(command, 500)}\`\`\``;
+  }
+  
+  if (workDir) {
+    displayText += `\n📁 *Project:* ${workDir}`;
+  }
+
   return [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*Approval needed*: \`${toolName}\`\n${truncate(details, 2000)}`,
+        text: truncate(displayText, 2000),
       },
     },
     {

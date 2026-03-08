@@ -99,6 +99,10 @@ export interface HITLRequestEventParams {
   toolName: string;
   details: string;
   options: string[];
+  command?: string;
+  workDir?: string;
+  rule?: string;
+  method?: string;
 }
 
 export interface DoneEventParams {
