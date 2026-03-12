@@ -19,28 +19,59 @@ export function buildHITLPrompt(
   command?: string,
   workDir?: string,
   rule?: string,
+  method?: string,
 ): KnownBlock[] {
-  // Build enhanced display with command and rule
-  let displayText = `*Security Approval Required*`;
+  // Build comprehensive display with all available information
+  let displayText = `🔒 *Security Approval Required*`;
   
+  // Show the tool being used
+  if (toolName) {
+    displayText += `\n🔧 *Tool:* ${toolName}`;
+  }
+  
+  // Show the security rule that triggered this
   if (rule) {
-    displayText += `\n🛡️ *Rule:* ${rule}`;
+    displayText += `\n🛡️ *Security Rule:* ${rule}`;
   }
   
-  if (command) {
-    displayText += `\n⚡ *Command:* \`\`\`${truncate(command, 500)}\`\`\``;
+  // Show the method for additional context
+  if (method) {
+    displayText += `\n📋 *Method:* ${method}`;
   }
   
+  // Show the working directory/project context
   if (workDir) {
-    displayText += `\n📁 *Project:* ${workDir}`;
+    displayText += `\n📁 *Working Directory:* \`${workDir}\``;
   }
+  
+  // Show the command details (most important for decision-making)
+  if (command && command.trim()) {
+    displayText += `\n⚡ *Command Details:*\n\`\`\`${truncate(command, 800)}\`\`\``;
+  }
+  
+  // Show additional details from the security extension
+  if (details && details !== toolName && details.trim()) {
+    displayText += `\n📝 *Additional Info:*\n${truncate(details, 600)}`;
+  }
+  
+  displayText += `\n\n*Please review the above information carefully before making a decision.*`;
 
   return [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: truncate(displayText, 2000),
+        text: truncate(displayText, 2800),
+      },
+    },
+    {
+      type: "divider"
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*Session:* \`${sessionId}\` • *Request:* \`${requestId}\``,
       },
     },
     {
@@ -48,21 +79,21 @@ export function buildHITLPrompt(
       elements: [
         {
           type: "button",
-          text: { type: "plain_text", text: "Approve" },
+          text: { type: "plain_text", text: "✅ Approve" },
           style: "primary",
           action_id: "hitl_approve",
           value: `${sessionId}:${requestId}`,
         },
         {
           type: "button",
-          text: { type: "plain_text", text: "Deny" },
+          text: { type: "plain_text", text: "❌ Deny" },
           style: "danger",
           action_id: "hitl_deny",
           value: `${sessionId}:${requestId}`,
         },
         {
           type: "button",
-          text: { type: "plain_text", text: "Abort Task" },
+          text: { type: "plain_text", text: "🛑 Abort Task" },
           action_id: "hitl_abort",
           value: `${sessionId}:${requestId}`,
         },

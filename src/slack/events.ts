@@ -305,8 +305,17 @@ function setupSessionListeners(
       .postMessage({
         channel: channelId,
         thread_ts: threadTs,
-        text: `Security approval needed: ${p.rule || p.toolName}`,
-        blocks: buildHITLPrompt(p.sessionId, p.requestId, p.toolName, p.details, p.command, p.workDir, p.rule),
+        text: `🔒 Security Approval Required - ${p.rule || p.toolName || 'Permission needed'}`,
+        blocks: buildHITLPrompt(
+          p.sessionId, 
+          p.requestId, 
+          p.toolName, 
+          p.details, 
+          p.command, 
+          p.workDir, 
+          p.rule,
+          p.method
+        ),
       })
       .catch(() => {});
   };
