@@ -93,16 +93,30 @@ export interface ToolResultEventParams {
   success: boolean;
 }
 
+// New optional fields (filePath, whitelistedPaths, structuredInput,
+// riskLevel, reason, toolCategory) are populated by the Go server's
+// security extension starting from protocol version TBD.
+// See ~/development/agentloop for server-side implementation.
 export interface HITLRequestEventParams {
   sessionId: string;
   requestId: string;
-  toolName: string;
-  details: string;
-  options: string[];
-  command?: string;
-  workDir?: string;
-  rule?: string;
-  method?: string;
+  toolName: string;        // human-readable tool label
+  details: string;         // free-text description (may equal toolName)
+  options: string[];       // approve/deny/etc choices
+
+  // Existing optional fields
+  command?: string;        // raw command / file path / URL
+  workDir?: string;        // cwd at time of request
+  rule?: string;           // security rule name that fired
+  method?: string;         // sub-method within the rule
+
+  // Enriched context fields (populated by Go server when available)
+  toolCategory?: "file" | "bash" | "network" | "process" | "other";
+  filePath?: string;       // the specific file/dir path (for file tools)
+  whitelistedPaths?: string[];  // paths that ARE allowed (for context)
+  structuredInput?: Record<string, unknown>; // parsed tool input key/values
+  riskLevel?: "low" | "medium" | "high";    // severity hint from server
+  reason?: string;         // one-line human explanation of why blocked
 }
 
 export interface DoneEventParams {
