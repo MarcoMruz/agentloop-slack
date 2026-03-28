@@ -9,7 +9,7 @@ import type {
   ErrorEventParams,
 } from "../agentloop/types.js";
 import type { SessionMap } from "./session-map.js";
-import { buildHITLPrompt, buildTaskResult } from "./blocks.js";
+import { buildHITLAutoApproved, buildHITLPrompt, buildTaskResult } from "./blocks.js";
 import { isAllowed } from "../security/allowlist.js";
 import { checkRateLimit } from "../security/rate-limiter.js";
 import { logger } from "../utils/logger.js";
@@ -301,6 +301,20 @@ function setupSessionListeners(
 
   const onHITL = async (p: HITLRequestEventParams) => {
     if (p.sessionId !== sessionId) return;
+
+    if (p.autoApproved) {
+      // Auto-approved: post compact info message, no action buttons needed
+      await client.chat
+        .postMessage({
+          channel: channelId,
+          thread_ts: threadTs,
+          text: `✅ Auto-approved: ${p.toolName}`,
+          blocks: buildHITLAutoApproved(p),
+        })
+        .catch(() => {});
+      return;
+    }
+
     await client.chat
       .postMessage({
         channel: channelId,
