@@ -117,6 +117,10 @@ export interface HITLRequestEventParams {
   structuredInput?: Record<string, unknown>; // parsed tool input key/values
   riskLevel?: "low" | "medium" | "high";    // severity hint from server
   reason?: string;         // one-line human explanation of why blocked
+
+  // Auto-approval: when true, the request was approved automatically by
+  // the security policy. No user action is needed; post info-only message.
+  autoApproved?: boolean;
 }
 
 export interface DoneEventParams {

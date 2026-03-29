@@ -122,6 +122,32 @@ function buildLegacyDisplay(params: HITLRequestEventParams): string {
 }
 
 /**
+ * Build a compact info-only Block Kit message for auto-approved HITL events.
+ * No action buttons — the operation was already allowed automatically.
+ */
+export function buildHITLAutoApproved(params: HITLRequestEventParams): KnownBlock[] {
+  const badge = params.riskLevel ? RISK_BADGES[params.riskLevel] : undefined;
+  const icon = params.toolCategory ? CATEGORY_ICONS[params.toolCategory] ?? "🔧" : "🔧";
+  const riskPart = badge ? ` ${badge}` : "";
+  const reasonPart = params.reason ? `\n_${params.reason}_` : (params.rule ? `\n_${params.rule}_` : "");
+  const commandPart = params.command ? `\n\`${truncate(params.command, 200)}\`` : "";
+
+  const text = `✅ *Auto-approved*${riskPart}  ${icon} ${params.toolName}${reasonPart}${commandPart}`;
+
+  return [
+    {
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: truncate(text, 600),
+        },
+      ],
+    },
+  ];
+}
+
+/**
  * Build Block Kit HITL approval prompt with Approve / Deny / Abort buttons.
  * Renders enriched view when new fields are present, legacy view otherwise.
  */
