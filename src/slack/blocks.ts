@@ -1,5 +1,5 @@
 import type { KnownBlock } from "@slack/types";
-import type { DoneEventParams, HITLRequestEventParams, SessionInfo } from "../agentloop/types.js";
+import type { DoneEventParams, HITLAutoApprovedEventParams, HITLRequestEventParams, SessionInfo } from "../agentloop/types.js";
 
 const MAX_TEXT_LENGTH = 3000;
 const MAX_WHITELISTED_PATHS = 10;
@@ -125,14 +125,13 @@ function buildLegacyDisplay(params: HITLRequestEventParams): string {
  * Build a compact info-only Block Kit message for auto-approved HITL events.
  * No action buttons — the operation was already allowed automatically.
  */
-export function buildHITLAutoApproved(params: HITLRequestEventParams): KnownBlock[] {
+export function buildHITLAutoApproved(params: HITLAutoApprovedEventParams): KnownBlock[] {
   const badge = params.riskLevel ? RISK_BADGES[params.riskLevel] : undefined;
-  const icon = params.toolCategory ? CATEGORY_ICONS[params.toolCategory] ?? "🔧" : "🔧";
   const riskPart = badge ? ` ${badge}` : "";
-  const reasonPart = params.reason ? `\n_${params.reason}_` : (params.rule ? `\n_${params.rule}_` : "");
+  const rulePart = params.rule ? `\n_${params.rule}_` : "";
   const commandPart = params.command ? `\n\`${truncate(params.command, 200)}\`` : "";
 
-  const text = `✅ *Auto-approved*${riskPart}  ${icon} ${params.toolName}${reasonPart}${commandPart}`;
+  const text = `✅ *Auto-approved*${riskPart}  🔧 ${params.toolName}${rulePart}${commandPart}`;
 
   return [
     {

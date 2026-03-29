@@ -5,6 +5,7 @@ import type {
   TextEventParams,
   ToolUseEventParams,
   HITLRequestEventParams,
+  HITLAutoApprovedEventParams,
   DoneEventParams,
   ErrorEventParams,
 } from "../agentloop/types.js";
@@ -231,6 +232,7 @@ function setupSessionListeners(
     agentloop.off("event.text", onText);
     agentloop.off("event.tool_use", onToolUse);
     agentloop.off("event.hitl_request", onHITL);
+    agentloop.off("event.hitl_auto_approved", onHITLAutoApproved);
     agentloop.off("event.done", onDone);
     agentloop.off("event.error", onError);
   };
@@ -301,26 +303,24 @@ function setupSessionListeners(
 
   const onHITL = async (p: HITLRequestEventParams) => {
     if (p.sessionId !== sessionId) return;
-
-    if (p.autoApproved) {
-      // Auto-approved: post compact info message, no action buttons needed
-      await client.chat
-        .postMessage({
-          channel: channelId,
-          thread_ts: threadTs,
-          text: `✅ Auto-approved: ${p.toolName}`,
-          blocks: buildHITLAutoApproved(p),
-        })
-        .catch(() => {});
-      return;
-    }
-
     await client.chat
       .postMessage({
         channel: channelId,
         thread_ts: threadTs,
         text: `🔒 Security Approval Required - ${p.rule || p.toolName || 'Permission needed'}`,
         blocks: buildHITLPrompt(p),
+      })
+      .catch(() => {});
+  };
+
+  const onHITLAutoApproved = async (p: HITLAutoApprovedEventParams) => {
+    if (p.sessionId !== sessionId) return;
+    await client.chat
+      .postMessage({
+        channel: channelId,
+        thread_ts: threadTs,
+        text: `✅ Auto-approved: \`${p.toolName}\``,
+        blocks: buildHITLAutoApproved(p),
       })
       .catch(() => {});
   };
@@ -416,6 +416,7 @@ function setupSessionListeners(
   agentloop.on("event.text", onText);
   agentloop.on("event.tool_use", onToolUse);
   agentloop.on("event.hitl_request", onHITL);
+  agentloop.on("event.hitl_auto_approved", onHITLAutoApproved);
   agentloop.on("event.done", onDone);
   agentloop.on("event.error", onError);
 }

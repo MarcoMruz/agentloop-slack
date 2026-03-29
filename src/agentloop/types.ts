@@ -117,10 +117,18 @@ export interface HITLRequestEventParams {
   structuredInput?: Record<string, unknown>; // parsed tool input key/values
   riskLevel?: "low" | "medium" | "high";    // severity hint from server
   reason?: string;         // one-line human explanation of why blocked
+}
 
-  // Auto-approval: when true, the request was approved automatically by
-  // the security policy. No user action is needed; post info-only message.
-  autoApproved?: boolean;
+// Emitted by the Go server when a HITL request was automatically approved
+// by the security policy (riskLevel is "low" or "medium" and AutoApproveNonHigh
+// is enabled). This is a separate event from event.hitl_request.
+export interface HITLAutoApprovedEventParams {
+  sessionId: string;
+  requestId: string;
+  toolName: string;
+  riskLevel: string;       // "low" | "medium"
+  command: string;
+  rule: string;
 }
 
 export interface DoneEventParams {
@@ -148,6 +156,7 @@ export type AgentEvent =
   | { method: "event.tool_use"; params: ToolUseEventParams }
   | { method: "event.tool_result"; params: ToolResultEventParams }
   | { method: "event.hitl_request"; params: HITLRequestEventParams }
+  | { method: "event.hitl_auto_approved"; params: HITLAutoApprovedEventParams }
   | { method: "event.done"; params: DoneEventParams }
   | { method: "event.error"; params: ErrorEventParams }
   | { method: "event.session_saved"; params: SessionSavedEventParams };
