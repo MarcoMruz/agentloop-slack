@@ -2,6 +2,7 @@ import type { App } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { AgentLoopClient } from "../agentloop/client.js";
 import type {
+  TextEventParams,
   ToolUseEventParams,
   HITLRequestEventParams,
   HITLAutoApprovedEventParams,
@@ -13,8 +14,6 @@ import { buildHITLAutoApproved, buildHITLPrompt } from "./blocks.js";
 import { isAllowed } from "../security/allowlist.js";
 import { checkRateLimit } from "../security/rate-limiter.js";
 import { logger } from "../utils/logger.js";
-
-const TYPING_INTERVAL_MS = 3_000;
 
 /**
  * Event handlers are PURE RELAYS:
@@ -210,10 +209,27 @@ async function startTaskFromMessage(
 }
 
 /**
+ * Set or clear the assistant thread status indicator.
+ * Requires assistant:write scope and "Agents and AI Apps" feature enabled.
+ */
+async function setThreadStatus(
+  client: WebClient,
+  channelId: string,
+  threadTs: string,
+  status: string,
+): Promise<void> {
+  await (client.assistant.threads as unknown as {
+    setStatus: (args: { channel_id: string; thread_ts: string; status: string }) => Promise<void>;
+  })
+    .setStatus({ channel_id: channelId, thread_ts: threadTs, status })
+    .catch(() => {});
+}
+
+/**
  * Wire up AgentLoop event listeners for a session.
  *
  * Thread output is restricted to HITL messages only.
- * A Slack typing indicator is kept alive while the agent is working.
+ * Assistant thread status is used to show "thinking" state while agent works.
  */
 function setupSessionListeners(
   agentloop: AgentLoopClient,
@@ -223,31 +239,12 @@ function setupSessionListeners(
   channelId: string,
   threadTs: string,
 ) {
-  let typingTimer: NodeJS.Timeout | null = null;
   let cleaned = false;
-
-  // Send a typing indicator and schedule the next one.
-  // chat.typing is not in the typed SDK surface — use apiCall directly.
-  const sendTyping = () => {
-    client.apiCall("chat.typing", { channel: channelId, thread_ts: threadTs }).catch(() => {});
-  };
-
-  const startTyping = () => {
-    sendTyping();
-    typingTimer = setInterval(sendTyping, TYPING_INTERVAL_MS);
-  };
-
-  const stopTyping = () => {
-    if (typingTimer) {
-      clearInterval(typingTimer);
-      typingTimer = null;
-    }
-  };
 
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
-    stopTyping();
+    agentloop.off("event.text", onText);
     agentloop.off("event.tool_use", onToolUse);
     agentloop.off("event.hitl_request", onHITL);
     agentloop.off("event.hitl_auto_approved", onHITLAutoApproved);
@@ -259,21 +256,22 @@ function setupSessionListeners(
   const info = sessionMap.getBySession(sessionId);
   if (info) info.cleanup = cleanup;
 
-  // Start typing indicator immediately — agent is now working
-  startTyping();
+  // Set initial "thinking" status
+  void setThreadStatus(client, channelId, threadTs, "is thinking...");
 
   // --- Event listeners (filter by sessionId) ---
 
-  // Tool use: keep typing indicator alive (already handled by interval), no message.
+  // Text chunks: no-op — final output is posted by onDone.
+  const onText = (_p: TextEventParams) => {};
+
+  // Tool use: update status to show which tool is running.
   const onToolUse = (p: ToolUseEventParams) => {
     if (p.sessionId !== sessionId) return;
-    // Typing indicator is already running — nothing else to do.
+    void setThreadStatus(client, channelId, threadTs, `is using ${p.toolName}...`);
   };
 
   const onHITL = async (p: HITLRequestEventParams) => {
     if (p.sessionId !== sessionId) return;
-    // Pause typing while waiting for human response
-    stopTyping();
     await client.chat
       .postMessage({
         channel: channelId,
@@ -301,6 +299,20 @@ function setupSessionListeners(
 
     cleanup();
 
+    // Clear assistant thread status
+    await setThreadStatus(client, channelId, threadTs, "");
+
+    // Post the agent's response text to the thread
+    if (p.output && p.output.trim()) {
+      await client.chat
+        .postMessage({
+          channel: channelId,
+          thread_ts: threadTs,
+          text: p.output,
+        })
+        .catch(() => {});
+    }
+
     await client.reactions
       .remove({ channel: channelId, timestamp: threadTs, name: "eyes" })
       .catch(() => {});
@@ -315,6 +327,9 @@ function setupSessionListeners(
     if (p.sessionId !== sessionId) return;
 
     cleanup();
+
+    // Clear assistant thread status
+    await setThreadStatus(client, channelId, threadTs, "");
 
     await client.chat
       .postMessage({
@@ -335,6 +350,7 @@ function setupSessionListeners(
   };
 
   // Register all listeners
+  agentloop.on("event.text", onText);
   agentloop.on("event.tool_use", onToolUse);
   agentloop.on("event.hitl_request", onHITL);
   agentloop.on("event.hitl_auto_approved", onHITLAutoApproved);
