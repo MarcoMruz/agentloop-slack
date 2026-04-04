@@ -17,11 +17,17 @@ import { checkRateLimit } from "../security/rate-limiter.js";
 import { logger } from "../utils/logger.js";
 
 /** Where to post the evolution completion report for a given user. */
-interface FeedbackOrigin {
+export interface FeedbackOrigin {
   channelId: string;
   threadTs?: string;
 }
 const pendingFeedback = new Map<string, FeedbackOrigin>();
+
+/** Track where to route the evolution_complete report for a user.
+ *  Call this after submitFeedback() succeeds (e.g. from /feedback slash command). */
+export function trackFeedbackOrigin(userId: string, origin: FeedbackOrigin): void {
+  pendingFeedback.set(userId, origin);
+}
 
 /** Extract "feedback:" / "/feedback " prefix. Returns stripped text or null. */
 function extractFeedbackText(raw: string): string | null {
