@@ -93,6 +93,34 @@ export function registerCommands(
     }
   });
 
+  // /feedback — submit explicit feedback to trigger MemEvolve
+  app.command("/feedback", async ({ command, ack, respond }) => {
+    await ack();
+    if (!isAllowed(command.user_id)) {
+      await respond("Unauthorized");
+      return;
+    }
+
+    const text = command.text.trim();
+    if (!text) {
+      await respond("Usage: `/feedback <what went wrong or what you expected>`");
+      return;
+    }
+
+    try {
+      await agentloop.submitFeedback({
+        userId: command.user_id,
+        text,
+      });
+      await respond(
+        "✅ Feedback received — the agent will analyze it and may update its behavior. " +
+        "You'll get a report here when evolution completes.",
+      );
+    } catch (err) {
+      await respond(`Error submitting feedback: ${(err as Error).message}`);
+    }
+  });
+
   // /abort [sessionId] — abort a running session
   app.command("/abort", async ({ command, ack, respond }) => {
     await ack();

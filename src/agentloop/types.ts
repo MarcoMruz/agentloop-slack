@@ -150,6 +150,32 @@ export interface SessionSavedEventParams {
   sessionId: string;
 }
 
+// Fired after a MemEvolve evolution finishes successfully.
+// Broadcast to ALL connected clients (not session-scoped).
+export interface EvolutionCompleteEventParams {
+  userId: string;
+  summary: string;
+  reasoning: string;
+  configChanged: boolean;
+  skillChanges: number;   // number of skills created/updated
+  noteCount: number;      // number of atomic notes written
+  agentsMDChanged: boolean;
+}
+
+// --- Feedback params ---
+
+export interface FeedbackSubmitParams {
+  userId: string;
+  text: string;
+  sessionId?: string;
+  context?: string;
+  expectedBehavior?: string;
+}
+
+export interface FeedbackSubmitResult {
+  ok: boolean;
+}
+
 // Discriminated union of all server events
 export type AgentEvent =
   | { method: "event.text"; params: TextEventParams }
@@ -159,4 +185,5 @@ export type AgentEvent =
   | { method: "event.hitl_auto_approved"; params: HITLAutoApprovedEventParams }
   | { method: "event.done"; params: DoneEventParams }
   | { method: "event.error"; params: ErrorEventParams }
-  | { method: "event.session_saved"; params: SessionSavedEventParams };
+  | { method: "event.session_saved"; params: SessionSavedEventParams }
+  | { method: "event.evolution_complete"; params: EvolutionCompleteEventParams };

@@ -8,12 +8,29 @@ import type {
   HITLAutoApprovedEventParams,
   DoneEventParams,
   ErrorEventParams,
+  EvolutionCompleteEventParams,
 } from "../agentloop/types.js";
 import type { SessionMap } from "./session-map.js";
 import { buildHITLAutoApproved, buildHITLPrompt } from "./blocks.js";
 import { isAllowed } from "../security/allowlist.js";
 import { checkRateLimit } from "../security/rate-limiter.js";
 import { logger } from "../utils/logger.js";
+
+/** Where to post the evolution completion report for a given user. */
+interface FeedbackOrigin {
+  channelId: string;
+  threadTs?: string;
+}
+const pendingFeedback = new Map<string, FeedbackOrigin>();
+
+/** Extract "feedback:" / "/feedback " prefix. Returns stripped text or null. */
+function extractFeedbackText(raw: string): string | null {
+  const s = raw.trim();
+  const lower = s.toLowerCase();
+  if (lower.startsWith("feedback:")) return s.slice("feedback:".length).trim();
+  if (lower.startsWith("/feedback ")) return s.slice("/feedback ".length).trim();
+  return null;
+}
 
 const TEXT_FLUSH_INTERVAL_MS = 1_000;
 
@@ -51,9 +68,36 @@ export function registerEvents(
       return;
     }
 
-    const text = message.text || "";
+    const rawText = message.text || "";
     const channelId = message.channel;
     const threadTs = message.thread_ts || message.ts;
+
+    // Feedback prefix → submit to MemEvolve, skip task start
+    const feedbackText = extractFeedbackText(rawText);
+    if (feedbackText) {
+      pendingFeedback.set(message.user, { channelId, threadTs });
+      try {
+        await agentloop.submitFeedback({ userId: message.user, text: feedbackText });
+        await client.chat
+          .postMessage({
+            channel: channelId,
+            thread_ts: threadTs,
+            text:
+              "✅ Feedback received — analyzing and may update agent behavior. " +
+              "I'll report back here when evolution completes.",
+          })
+          .catch(() => {});
+      } catch (err) {
+        await client.chat
+          .postMessage({
+            channel: channelId,
+            thread_ts: threadTs,
+            text: `Failed to submit feedback: ${(err as Error).message}`,
+          })
+          .catch(() => {});
+      }
+      return;
+    }
 
     // Thread reply to existing session → steer
     const existingSessionId = message.thread_ts
@@ -62,7 +106,7 @@ export function registerEvents(
 
     if (existingSessionId) {
       try {
-        await agentloop.steerTask(existingSessionId, text);
+        await agentloop.steerTask(existingSessionId, rawText);
       } catch (err) {
         await client.chat
           .postMessage({
@@ -81,10 +125,44 @@ export function registerEvents(
       client,
       sessionMap,
       message.user,
-      text,
+      rawText,
       channelId,
       message.ts,
     );
+  });
+
+  // Evolution completion — posted back to wherever the user submitted feedback
+  agentloop.on("event.evolution_complete", async (p: EvolutionCompleteEventParams) => {
+    const origin = pendingFeedback.get(p.userId);
+    pendingFeedback.delete(p.userId);
+
+    const changes: string[] = [];
+    if (p.configChanged) changes.push("pipeline config tuned");
+    if (p.skillChanges > 0) changes.push(`${p.skillChanges} skill${p.skillChanges > 1 ? "s" : ""} evolved`);
+    if (p.noteCount > 0) changes.push(`${p.noteCount} memory note${p.noteCount > 1 ? "s" : ""} added`);
+    if (p.agentsMDChanged) changes.push("agent instructions updated");
+
+    const changesText = changes.length > 0
+      ? `\n\n*Changes applied:* ${changes.join(", ")}`
+      : "";
+    const text =
+      `🧠 *Evolution complete*\n\n*Summary:* ${p.summary}${changesText}\n\n_Reasoning: ${p.reasoning}_`;
+
+    if (origin) {
+      await app.client.chat
+        .postMessage({
+          channel: origin.channelId,
+          thread_ts: origin.threadTs,
+          text,
+        })
+        .catch((err: Error) => logger.warn("Failed to post evolution result", { error: err.message }));
+    } else {
+      // No tracked origin — log only (e.g. evolution was triggered by the agent itself)
+      logger.info("Evolution complete (no Slack origin to notify)", {
+        userId: p.userId,
+        summary: p.summary,
+      });
+    }
   });
 
   // @mentions

@@ -13,6 +13,8 @@ import type {
   SessionInfo,
   HealthCheckResult,
   OkResult,
+  FeedbackSubmitParams,
+  FeedbackSubmitResult,
 } from "./types.js";
 import { logger } from "../utils/logger.js";
 
@@ -183,6 +185,10 @@ export class AgentLoopClient extends EventEmitter {
 
   async healthCheck() {
     return this.request<HealthCheckResult>("health.check", {});
+  }
+
+  async submitFeedback(params: FeedbackSubmitParams) {
+    return this.request<FeedbackSubmitResult>("feedback.submit", params as unknown as Record<string, unknown>);
   }
 
   // --- Reconnection ---
