@@ -5,6 +5,7 @@ import { SessionMap } from "./slack/session-map.js";
 import { registerEvents } from "./slack/events.js";
 import { registerCommands } from "./slack/commands.js";
 import { registerActions } from "./slack/actions.js";
+import { registerAssistant } from "./slack/assistant.js";
 import { logger, setLogLevel } from "./utils/logger.js";
 
 async function main() {
@@ -32,6 +33,7 @@ async function main() {
   registerEvents(app, agentloop, sessionMap);
   registerCommands(app, agentloop, sessionMap);
   registerActions(app, agentloop, sessionMap);
+  registerAssistant(app, agentloop, sessionMap);
 
   // Graceful shutdown
   const shutdown = async () => {
