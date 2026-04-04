@@ -4,6 +4,7 @@ import type { SessionMap } from "./session-map.js";
 import { isAllowed } from "../security/allowlist.js";
 import { checkRateLimit } from "../security/rate-limiter.js";
 import { buildSessionList } from "./blocks.js";
+import { trackFeedbackOrigin } from "./events.js";
 import { getWeather } from "../integrations/weather.js";
 import { getCalendarEvents } from "../integrations/calendar.js";
 
@@ -112,6 +113,8 @@ export function registerCommands(
         userId: command.user_id,
         text,
       });
+      // Track origin so event.evolution_complete routes back to this channel
+      trackFeedbackOrigin(command.user_id, { channelId: command.channel_id });
       await respond(
         "✅ Feedback received — the agent will analyze it and may update its behavior. " +
         "You'll get a report here when evolution completes.",
