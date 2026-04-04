@@ -1,5 +1,6 @@
 import { Assistant } from "@slack/bolt";
 import type { App, SayFn } from "@slack/bolt";
+import type { WebClient } from "@slack/web-api";
 import type { AgentLoopClient } from "../agentloop/client.js";
 import type {
   TextEventParams,
@@ -14,6 +15,8 @@ import { buildHITLAutoApproved, buildHITLPrompt } from "./blocks.js";
 import { isAllowed } from "../security/allowlist.js";
 import { checkRateLimit } from "../security/rate-limiter.js";
 import { logger } from "../utils/logger.js";
+
+const TEXT_FLUSH_INTERVAL_MS = 1_000;
 
 /**
  * Registers the Slack Assistant handler.
@@ -117,7 +120,7 @@ export function registerAssistant(
         sessionMap.set(sessionId, { channelId, threadTs, userId });
 
         // Wire up streaming event listeners
-        setupAssistantListeners(agentloop, sessionMap, sessionId, say, setStatus);
+        setupAssistantListeners(agentloop, sessionMap, sessionId, say, setStatus, client, channelId, threadTs);
       } catch (err) {
         const errMsg = (err as Error).message;
         logger.error("assistant: failed to start task", { error: errMsg });
@@ -138,8 +141,11 @@ export function registerAssistant(
 /**
  * Wire up AgentLoop event listeners for an assistant thread session.
  *
- * Uses say() from AssistantUtilityArgs for thread messages and setStatus()
- * for progress indicators. HITL messages are posted via say() with Block Kit.
+ * Text is streamed progressively: chunks are buffered and flushed every
+ * TEXT_FLUSH_INTERVAL_MS. The first flush uses say() to post a new message
+ * (which attaches assistant thread metadata); subsequent flushes call
+ * client.chat.update on that message's ts. On event.done the message is
+ * updated with the final authoritative output.
  */
 function setupAssistantListeners(
   agentloop: AgentLoopClient,
@@ -147,12 +153,39 @@ function setupAssistantListeners(
   sessionId: string,
   say: SayFn,
   setStatus: (status: string) => Promise<unknown>,
+  client: WebClient,
+  channelId: string,
+  threadTs: string,
 ) {
   let cleaned = false;
+  let textBuffer = "";
+  let streamTs: string | undefined;
+  let flushTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const flushText = async () => {
+    flushTimer = undefined;
+    if (!textBuffer) return;
+    const text = textBuffer;
+    if (!streamTs) {
+      // First flush: use say() to get assistant thread metadata attached.
+      const result = await say(text).catch(() => undefined) as { ts?: string } | undefined;
+      streamTs = result?.ts;
+    } else {
+      await client.chat
+        .update({ channel: channelId, ts: streamTs, text })
+        .catch(() => {});
+    }
+  };
+
+  const scheduleFlush = () => {
+    if (flushTimer) return;
+    flushTimer = setTimeout(() => { void flushText(); }, TEXT_FLUSH_INTERVAL_MS);
+  };
 
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = undefined; }
     agentloop.off("event.text", onText);
     agentloop.off("event.tool_use", onToolUse);
     agentloop.off("event.hitl_request", onHITL);
@@ -165,8 +198,12 @@ function setupAssistantListeners(
   const info = sessionMap.getBySession(sessionId);
   if (info) info.cleanup = cleanup;
 
-  // Text chunks: no-op — final output posted by onDone
-  const onText = (_p: TextEventParams) => {};
+  // Accumulate text chunks and schedule a Slack update.
+  const onText = (p: TextEventParams) => {
+    if (p.sessionId !== sessionId) return;
+    textBuffer += p.content;
+    scheduleFlush();
+  };
 
   // Tool use: update status with current tool name
   const onToolUse = (p: ToolUseEventParams) => {
@@ -196,10 +233,19 @@ function setupAssistantListeners(
     cleanup();
     await setStatus("").catch(() => {});
 
-    if (p.output && p.output.trim()) {
-      await say(p.output).catch(() => {});
+    // Use server's authoritative output; fall back to accumulated buffer.
+    const finalText = (p.output && p.output.trim()) ? p.output : textBuffer;
+
+    if (finalText.trim()) {
+      if (streamTs) {
+        await client.chat
+          .update({ channel: channelId, ts: streamTs, text: finalText })
+          .catch(() => {});
+      } else {
+        await say(finalText).catch(() => {});
+      }
     } else {
-      await say("Task completed.").catch(() => {});
+      if (!streamTs) await say("Task completed.").catch(() => {});
     }
 
     sessionMap.remove(sessionId);
@@ -210,7 +256,16 @@ function setupAssistantListeners(
 
     cleanup();
     await setStatus("").catch(() => {});
-    await say(`Error: ${p.message}`).catch(() => {});
+
+    const errorText = `Error: ${p.message}`;
+    if (streamTs) {
+      await client.chat
+        .update({ channel: channelId, ts: streamTs, text: errorText })
+        .catch(() => {});
+    } else {
+      await say(errorText).catch(() => {});
+    }
+
     sessionMap.remove(sessionId);
   };
 

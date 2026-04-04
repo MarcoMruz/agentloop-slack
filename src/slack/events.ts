@@ -15,6 +15,8 @@ import { isAllowed } from "../security/allowlist.js";
 import { checkRateLimit } from "../security/rate-limiter.js";
 import { logger } from "../utils/logger.js";
 
+const TEXT_FLUSH_INTERVAL_MS = 1_000;
+
 /**
  * Event handlers are PURE RELAYS:
  * 1. Receive Slack message
@@ -25,9 +27,9 @@ import { logger } from "../utils/logger.js";
  * NO memory, NO context, NO session logic.
  *
  * Thread output policy:
- * - While running: Slack typing indicator (no tool-use messages)
+ * - While running: streaming text updates + tool-use status
  * - Thread messages: HITL requests and auto-approved HITL only
- * - Completion: reaction update only (eyes → ✅ or ❌)
+ * - Completion: final text update + reaction (eyes → ✅ or ❌)
  */
 export function registerEvents(
   app: App,
@@ -228,8 +230,10 @@ async function setThreadStatus(
 /**
  * Wire up AgentLoop event listeners for a session.
  *
- * Thread output is restricted to HITL messages only.
- * Assistant thread status is used to show "thinking" state while agent works.
+ * Text is streamed progressively: chunks are buffered and flushed to Slack
+ * every TEXT_FLUSH_INTERVAL_MS. The first flush posts a new message; subsequent
+ * flushes update it in place. On event.done the message is updated with the
+ * final authoritative output.
  */
 function setupSessionListeners(
   agentloop: AgentLoopClient,
@@ -240,10 +244,35 @@ function setupSessionListeners(
   threadTs: string,
 ) {
   let cleaned = false;
+  let textBuffer = "";
+  let streamTs: string | undefined; // ts of the streaming message being updated
+  let flushTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const flushText = async () => {
+    flushTimer = undefined;
+    if (!textBuffer) return;
+    const text = textBuffer;
+    if (!streamTs) {
+      const result = await client.chat
+        .postMessage({ channel: channelId, thread_ts: threadTs, text })
+        .catch(() => undefined);
+      streamTs = result?.ts;
+    } else {
+      await client.chat
+        .update({ channel: channelId, ts: streamTs, text })
+        .catch(() => {});
+    }
+  };
+
+  const scheduleFlush = () => {
+    if (flushTimer) return;
+    flushTimer = setTimeout(() => { void flushText(); }, TEXT_FLUSH_INTERVAL_MS);
+  };
 
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = undefined; }
     agentloop.off("event.text", onText);
     agentloop.off("event.tool_use", onToolUse);
     agentloop.off("event.hitl_request", onHITL);
@@ -259,10 +288,14 @@ function setupSessionListeners(
   // Set initial "thinking" status
   void setThreadStatus(client, channelId, threadTs, "is thinking...");
 
-  // --- Event listeners (filter by sessionId) ---
+  // --- Event listeners (all filter by sessionId) ---
 
-  // Text chunks: no-op — final output is posted by onDone.
-  const onText = (_p: TextEventParams) => {};
+  // Accumulate text chunks and schedule a Slack update.
+  const onText = (p: TextEventParams) => {
+    if (p.sessionId !== sessionId) return;
+    textBuffer += p.content;
+    scheduleFlush();
+  };
 
   // Tool use: update status to show which tool is running.
   const onToolUse = (p: ToolUseEventParams) => {
@@ -298,19 +331,23 @@ function setupSessionListeners(
     if (p.sessionId !== sessionId) return;
 
     cleanup();
-
-    // Clear assistant thread status
     await setThreadStatus(client, channelId, threadTs, "");
 
-    // Post the agent's response text to the thread
-    if (p.output && p.output.trim()) {
-      await client.chat
-        .postMessage({
-          channel: channelId,
-          thread_ts: threadTs,
-          text: p.output,
-        })
-        .catch(() => {});
+    // Use server's authoritative output; fall back to accumulated buffer.
+    const finalText = (p.output && p.output.trim()) ? p.output : textBuffer;
+
+    if (finalText.trim()) {
+      if (streamTs) {
+        // Update the in-progress streaming message with final content.
+        await client.chat
+          .update({ channel: channelId, ts: streamTs, text: finalText })
+          .catch(() => {});
+      } else {
+        // No streaming happened yet — post directly.
+        await client.chat
+          .postMessage({ channel: channelId, thread_ts: threadTs, text: finalText })
+          .catch(() => {});
+      }
     }
 
     await client.reactions
@@ -327,17 +364,18 @@ function setupSessionListeners(
     if (p.sessionId !== sessionId) return;
 
     cleanup();
-
-    // Clear assistant thread status
     await setThreadStatus(client, channelId, threadTs, "");
 
-    await client.chat
-      .postMessage({
-        channel: channelId,
-        thread_ts: threadTs,
-        text: `Error: ${p.message}`,
-      })
-      .catch(() => {});
+    const errorText = `Error: ${p.message}`;
+    if (streamTs) {
+      await client.chat
+        .update({ channel: channelId, ts: streamTs, text: errorText })
+        .catch(() => {});
+    } else {
+      await client.chat
+        .postMessage({ channel: channelId, thread_ts: threadTs, text: errorText })
+        .catch(() => {});
+    }
 
     await client.reactions
       .remove({ channel: channelId, timestamp: threadTs, name: "eyes" })
