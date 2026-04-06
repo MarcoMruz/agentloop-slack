@@ -113,7 +113,8 @@ export function registerAssistant(
       const { workDir, cleanedText } = parseWorkDir(text);
 
       try {
-        const result = await agentloop.startTask(userId, cleanedText, workDir, "slack");
+        // Pass threadTs as conversationContextId so AgentLoop isolates history per thread
+        const result = await agentloop.startTask(userId, cleanedText, workDir, "slack", threadTs);
         const sessionId = result.sessionId;
 
         // Register session → thread mapping
