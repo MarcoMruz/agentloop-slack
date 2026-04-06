@@ -27,6 +27,7 @@ export interface TaskStartParams {
   text: string;
   workDir?: string;
   source?: string;
+  conversationContextId?: string;  // Thread ID for conversation history isolation
 }
 
 export interface TaskSteerParams {

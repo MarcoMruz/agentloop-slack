@@ -146,12 +146,13 @@ export class AgentLoopClient extends EventEmitter {
 
   // --- Convenience methods ---
 
-  async startTask(userId: string, text: string, workDir?: string, source = "slack") {
+  async startTask(userId: string, text: string, workDir?: string, source = "slack", conversationContextId?: string) {
     return this.request<TaskStartResult>("task.start", {
       userId,
       text,
       ...(workDir && { workDir }),
       source,
+      ...(conversationContextId && { conversationContextId }),
     } satisfies TaskStartParams);
   }
 
